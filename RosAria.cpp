@@ -51,6 +51,8 @@ class RosAriaNode
     void sonarConnectCb();
     void dynamic_reconfigureCB(rosaria::RosAriaConfig &config, uint32_t level);
     void readParameters();
+    // If robot has e--top button pressed, print a warning and return true. Otherwise return false.
+    bool check_estop(const char *s);
 
   protected:
     ros::NodeHandle n;
@@ -73,8 +75,22 @@ class RosAriaNode
 
     ros::ServiceServer enable_srv;
     ros::ServiceServer disable_srv;
+    ros::Subscriber wander_sub;
+    ros::Subscriber stop_wander_sub;
+
+
     bool enable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
     bool disable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
+
+    /**
+    * @breif Activate wander mode without needing arnl map to be populated.
+    *  ROS service callback function.
+    * @msg std_msgs::EmptyConstPtr
+    * 
+    */
+    void wander_cb(const std_msgs::EmptyConstPtr &msg);
+
+    void stop_wander_cb(const std_msgs::EmptyConstPtr &msg);
 
     ros::Time veltime;
 
@@ -286,7 +302,7 @@ RosAriaNode::RosAriaNode(ros::NodeHandle nh) :
   n.param( "aria_log_filename", aria_log_filename, std::string("Aria.log") );
 
   // whether to connect to lasers using aria
-  n.param("publish_aria_lasers", publish_aria_lasers, false);
+  n.param("publish_aria_lasers", publish_aria_lasers, true);
 
   // Get frame_ids to use.
   n.param("odom_frame", frame_id_odom, std::string("odom"));
@@ -320,6 +336,8 @@ RosAriaNode::RosAriaNode(ros::NodeHandle nh) :
   // advertise enable/disable services
   enable_srv = n.advertiseService("enable_motors", &RosAriaNode::enable_motors_cb, this);
   disable_srv = n.advertiseService("disable_motors", &RosAriaNode::disable_motors_cb, this);
+  wander_sub = n.subscribe("wander", 1, (boost::function <void(const std_msgs::EmptyConstPtr&)>) boost::bind(&RosAriaNode::wander_cb, this, _1));
+  stop_wander_sub = n.subscribe("stop_wander", 1, (boost::function <void(const std_msgs::EmptyConstPtr&)>) boost::bind(&RosAriaNode::stop_wander_cb, this, _1));
   
   veltime = ros::Time::now();
 }
@@ -681,6 +699,18 @@ void RosAriaNode::publish()
   } // end if sonar_enabled
 }
 
+bool RosAriaNode::check_estop(const char *s) {
+  robot->lock();
+  bool e = robot->isEStopPressed();
+  robot->unlock();
+  
+  if(e) {
+    ROS_ERROR_NAMED("RosAria", "RosAria: Warning: Robot e-stop button pressed, cannot %s", s);
+  }
+  
+  return e;
+}
+
 bool RosAriaNode::enable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response)
 {
     ROS_INFO("RosAria: Enable motors request.");
@@ -717,6 +747,38 @@ RosAriaNode::cmdvel_cb( const geometry_msgs::TwistConstPtr &msg)
   robot->unlock();
   ROS_DEBUG("RosAria: sent vels to to aria (time %f): x vel %f mm/s, y vel %f mm/s, ang vel %f deg/s", veltime.toSec(),
     (double) msg->linear.x * 1e3, (double) msg->linear.y * 1.3, (double) msg->angular.z * 180/M_PI);
+}
+
+void RosAriaNode::wander_cb(const std_msgs::EmptyConstPtr &msg)
+{
+  ROS_INFO_NAMED("RosAria", "RosAria: Enable wander mode request.");
+  ArActionStallRecover recover;
+  ArActionBumpers bumpers;
+  ArActionAvoidFront avoidFrontNear("Avoid Front Near", 225, 0);
+  ArActionAvoidFront avoidFrontFar;
+  ArActionConstantVelocity constantVelocity("Constant Velocity", 400);
+  ArActionStop stopRobot;
+
+  robot->addAction(&recover, 100);
+  robot->addAction(&bumpers, 75);
+  robot->addAction(&avoidFrontNear, 50);
+  robot->addAction(&avoidFrontFar, 49);
+  robot->addAction(&constantVelocity, 25);
+  ROS_INFO_NAMED("RosAria", "RosAria: Actions enabled.");
+  ROS_INFO_THROTTLE_NAMED(5,"RosAria", "RosAria: Wandering");
+  if(check_estop("wandering")) {
+    ROS_INFO_NAMED("RosAria", "RosAria: E-Stop pressed. Stopping robot.");
+    robot->addAction(&stopRobot,100);
+  }
+}
+
+void RosAriaNode::stop_wander_cb(const std_msgs::EmptyConstPtr &msg)
+{
+  ROS_INFO_NAMED("RosAria", "RosAria: Enable wander mode request.");
+  ArActionStop stopRobot;
+  robot->addAction(&stopRobot,100);
+
+  ROS_INFO_NAMED("RosAria", "RosAria: Actions disabled.");
 }
 
 
