@@ -1,18 +1,16 @@
 
-#ifdef ADEPT_PKG
-  #include <Aria.h>
-#else
-  #include <Aria/Aria.h>
-#endif
-
+#include "Aria.h"
 #include "LaserPublisher.h"
+
 #include "ArTimeToROSTime.h"
 
 #include <math.h>
 
+
+// TODO publish transform for sensor position?
 // TODO publish pointcloud of cumulative readings in separate topic?
 // TODO generic pointcloud sensor publisher (seprate point cloud stuff there)
-// TODO make  similar sonar publisher?
+// TODO sonar publisher? (take from rosaria)
 
 LaserPublisher::LaserPublisher(ArLaser *_l, ros::NodeHandle& _n, bool _broadcast_tf, const std::string& _tf_frame, const std::string& _parent_tf_frame, const std::string& _global_tf_frame) :
   laserReadingsCB(this, &LaserPublisher::readingsCB),
@@ -51,10 +49,11 @@ LaserPublisher::LaserPublisher(ArLaser *_l, ros::NodeHandle& _n, bool _broadcast
   laserscan.header.frame_id = "laser_frame";
   laserscan.angle_min = ArMath::degToRad(laser->getStartDegrees());
   laserscan.angle_max = ArMath::degToRad(laser->getEndDegrees());
-  //laserscan.time_increment = ?
-  laserscan.range_min = 0; //laser->getMinRange() / 1000.0;
+  laserscan.range_min = 0;
   laserscan.range_max = laser->getMaxRange() / 1000.0;
-  pointcloud.header.frame_id = globaltfname;
+  pointcloud.header.frame_id = "odom";
+
+  ROS_INFO("Global: %s Parent: %s", globaltfname.c_str(), parenttfname.c_str());
   
   // Get angle_increment of the laser
   laserscan.angle_increment = 0;
@@ -65,9 +64,7 @@ LaserPublisher::LaserPublisher(ArLaser *_l, ros::NodeHandle& _n, bool _broadcast
     laserscan.angle_increment = laser->getIncrementChoiceDouble();
   }
   assert(laserscan.angle_increment > 0);
-  laserscan.angle_increment *= M_PI/180.0;
-
-  //readingsCallbackTime = new ArTime;
+  laserscan.angle_increment *= M_PI/180.0;  
 }
 
 LaserPublisher::~LaserPublisher()
@@ -75,12 +72,10 @@ LaserPublisher::~LaserPublisher()
   laser->lockDevice();
   laser->remReadingCB(&laserReadingsCB);
   laser->unlockDevice();
-  //delete readingsCallbackTime;
 }
 
 void LaserPublisher::readingsCB()
 {
-  //printf("readingsCB(): %lu ms since last readingsCB() call.\n", readingsCallbackTime->mSecSince());
   assert(laser);
   laser->lockDevice();
   publishLaserScan();
@@ -88,7 +83,6 @@ void LaserPublisher::readingsCB()
   laser->unlockDevice();
   if(broadcast_tf)
     transform_broadcaster.sendTransform(tf::StampedTransform(lasertf, convertArTimeToROS(laser->getLastReadingTime()), parenttfname, tfname));
-  //readingsCallbackTime->setToNow();
 }
 
 void LaserPublisher::publishLaserScan()
@@ -96,15 +90,23 @@ void LaserPublisher::publishLaserScan()
   laserscan.header.stamp = convertArTimeToROS(laser->getLastReadingTime());
   const std::list<ArSensorReading*> *readings = laser->getRawReadings(); 
   assert(readings);
-  //printf("laserscan: %lu readings\n", readings->size());
+
   laserscan.ranges.resize(readings->size());
+
   size_t n = 0;
   if (laser->getFlipped()) {
     // Reverse the data
     for(std::list<ArSensorReading*>::const_reverse_iterator r = readings->rbegin(); r != readings->rend(); ++r)
     {
       assert(*r);
-      laserscan.ranges[n] = (*r)->getRange() / 1000.0;
+      
+      if ((*r)->getIgnoreThisReading()) {
+	laserscan.ranges[n] = -1;
+      }
+      else {
+	laserscan.ranges[n] = (*r)->getRange() / 1000.0;
+      }
+      
       ++n;
     }
   }
@@ -112,7 +114,14 @@ void LaserPublisher::publishLaserScan()
     for(std::list<ArSensorReading*>::const_iterator r = readings->begin(); r != readings->end(); ++r)
     {
       assert(*r);
-      laserscan.ranges[n] = (*r)->getRange() / 1000.0;
+      
+      if ((*r)->getIgnoreThisReading()) {
+	laserscan.ranges[n] = -1;
+      }
+      else {
+	laserscan.ranges[n] = (*r)->getRange() / 1000.0;
+      }
+      
       ++n;
     }
   }

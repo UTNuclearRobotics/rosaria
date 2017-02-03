@@ -79,6 +79,8 @@ class RosAriaNode
     ros::Subscriber stop_wander_sub;
 
 
+
+
     bool enable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
     bool disable_motors_cb(std_srvs::Empty::Request& request, std_srvs::Empty::Response& response);
 
@@ -100,6 +102,17 @@ class RosAriaNode
     ArRobotConnector *conn;
     ArLaserConnector *laserConnector;
     ArRobot *robot;
+    ArActionGroup *wanderGroup;
+
+    ArActionGroup *stopGroup;
+
+    ArActionStallRecover *recoverAction;
+    ArActionBumpers *bumperAction;
+    ArActionAvoidFront *avoidFrontNear;
+    ArActionAvoidFront *avoidFrontFar;
+    ArActionConstantVelocity *constantVelocity;
+    ArActionStop *stopRobot;
+
     nav_msgs::Odometry position;
     rosaria::BumperState bumpers;
     ArPose pos;
@@ -477,6 +490,33 @@ int RosAriaNode::Setup()
   
   dynamic_reconfigure_server->setCallback(boost::bind(&RosAriaNode::dynamic_reconfigureCB, this, _1, _2));
 
+  recoverAction = new ArActionStallRecover();
+  bumperAction = new ArActionBumpers();
+  avoidFrontNear = new ArActionAvoidFront("Avoid Front Near", 225, 0);
+  avoidFrontFar = new ArActionAvoidFront();
+  constantVelocity = new ArActionConstantVelocity("Constant Velocity", 100);
+  stopRobot = new ArActionStop();
+
+  wanderGroup = new ArActionGroup(robot);
+
+  // if we're stalled we want to back up and recover
+  wanderGroup->addAction(recoverAction, 100);
+
+  // react to bumpers
+  wanderGroup->addAction(bumperAction, 75);
+
+  // turn to avoid things closer to us
+  wanderGroup->addAction(avoidFrontNear, 50);
+
+  // turn avoid things further away
+  wanderGroup->addAction(avoidFrontFar, 45);
+
+  // keep moving
+  wanderGroup->addAction(constantVelocity, 25);
+
+  stopGroup = new ArActionGroup(robot);
+  stopGroup->addAction(stopRobot,100);
+
 
   // Enable the motors
   robot->enableMotors();
@@ -752,33 +792,18 @@ RosAriaNode::cmdvel_cb( const geometry_msgs::TwistConstPtr &msg)
 void RosAriaNode::wander_cb(const std_msgs::EmptyConstPtr &msg)
 {
   ROS_INFO_NAMED("RosAria", "RosAria: Enable wander mode request.");
-  ArActionStallRecover recover;
-  ArActionBumpers bumpers;
-  ArActionAvoidFront avoidFrontNear("Avoid Front Near", 225, 0);
-  ArActionAvoidFront avoidFrontFar;
-  ArActionConstantVelocity constantVelocity("Constant Velocity", 400);
-  ArActionStop stopRobot;
 
-  robot->addAction(&recover, 100);
-  robot->addAction(&bumpers, 75);
-  robot->addAction(&avoidFrontNear, 50);
-  robot->addAction(&avoidFrontFar, 49);
-  robot->addAction(&constantVelocity, 25);
-  ROS_INFO_NAMED("RosAria", "RosAria: Actions enabled.");
-  ROS_INFO_THROTTLE_NAMED(5,"RosAria", "RosAria: Wandering");
+  wanderGroup->activateExclusive();
   if(check_estop("wandering")) {
     ROS_INFO_NAMED("RosAria", "RosAria: E-Stop pressed. Stopping robot.");
-    robot->addAction(&stopRobot,100);
+    stopGroup->activateExclusive();
   }
 }
 
 void RosAriaNode::stop_wander_cb(const std_msgs::EmptyConstPtr &msg)
 {
   ROS_INFO_NAMED("RosAria", "RosAria: Enable wander mode request.");
-  ArActionStop stopRobot;
-  robot->addAction(&stopRobot,100);
-
-  ROS_INFO_NAMED("RosAria", "RosAria: Actions disabled.");
+  stopGroup->activateExclusive();
 }
 
 
