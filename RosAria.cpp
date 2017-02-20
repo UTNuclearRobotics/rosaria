@@ -29,7 +29,7 @@
 #include "LaserPublisher.h"
 
 #include <sstream>
-
+#include <random>
 
 // Node that interfaces between ROS and mobile robot base features via ARIA library. 
 //
@@ -77,6 +77,7 @@ class RosAriaNode
     ros::ServiceServer disable_srv;
     ros::Subscriber wander_sub;
     ros::Subscriber stop_wander_sub;
+    ros::Timer turn_timer;
 
 
 
@@ -93,6 +94,8 @@ class RosAriaNode
     void wander_cb(const std_msgs::EmptyConstPtr &msg);
 
     void stop_wander_cb(const std_msgs::EmptyConstPtr &msg);
+
+    void turnTimerCB(const ros::TimerEvent& e);
 
     ros::Time veltime;
 
@@ -352,6 +355,9 @@ RosAriaNode::RosAriaNode(ros::NodeHandle nh) :
   wander_sub = n.subscribe("wander", 1, (boost::function <void(const std_msgs::EmptyConstPtr&)>) boost::bind(&RosAriaNode::wander_cb, this, _1));
   stop_wander_sub = n.subscribe("stop_wander", 1, (boost::function <void(const std_msgs::EmptyConstPtr&)>) boost::bind(&RosAriaNode::stop_wander_cb, this, _1));
   
+  // Let's just say this is in progress
+  // turn_timer = n.createTimer(ros::Duration(20), (boost::function <void(const ros::TimerEvent&)>) boost::bind(&RosAriaNode::turnTimerCB, this, _1));
+
   veltime = ros::Time::now();
 }
 
@@ -492,7 +498,7 @@ int RosAriaNode::Setup()
 
   recoverAction = new ArActionStallRecover();
   bumperAction = new ArActionBumpers();
-  avoidFrontNear = new ArActionAvoidFront("Avoid Front Near", 225, 0);
+  avoidFrontNear = new ArActionAvoidFront("Avoid Front Near", 200, 0);
   avoidFrontFar = new ArActionAvoidFront();
   constantVelocity = new ArActionConstantVelocity("Constant Velocity", 100);
   stopRobot = new ArActionStop();
@@ -533,7 +539,7 @@ int RosAriaNode::Setup()
 
   // Run ArRobot background processing thread
   robot->runAsync(true);
-
+  stopGroup->activateExclusive();
   // connect to lasers and create publishers
   if(publish_aria_lasers)
   {
@@ -804,6 +810,29 @@ void RosAriaNode::stop_wander_cb(const std_msgs::EmptyConstPtr &msg)
 {
   ROS_INFO_NAMED("RosAria", "RosAria: Enable wander mode request.");
   stopGroup->activateExclusive();
+}
+
+void RosAriaNode::turnTimerCB(const ros::TimerEvent& e) {
+  if (wanderGroup->getActionList()->front()->isActive()) {
+    // ROS_INFO_NAMED("RosAria","RosAria: I'm wandering");
+
+    stopGroup->activateExclusive();
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 eng(rd()); // seed the generator
+    std::uniform_int_distribution<> distr(0, 9); // define the range
+    int numRand = distr(eng);
+    numRand = numRand-5;
+    robot->lock();
+    robot->setRotVel(numRand*10);
+    robot->unlock();
+    ArUtil::sleep(1000);
+    printf("Stopping\n");
+    robot->lock();
+    robot->setRotVel(0);
+    robot->unlock();
+    ArUtil::sleep(10);
+  }
+  wanderGroup->activateExclusive();
 }
 
 
