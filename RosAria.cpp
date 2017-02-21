@@ -567,6 +567,10 @@ int RosAriaNode::Setup()
     robot->unlock();
     ROS_INFO_NAMED("rosaria", "rosaria: Done creating laser publishers");
   }
+  publish_sonar = true;
+  robot->lock();
+  robot->enableSonar();
+  robot->unlock();
     
   // subscribe to command topics
   cmdvel_sub = n.subscribe( "cmd_vel", 1, (boost::function <void(const geometry_msgs::TwistConstPtr&)>)
@@ -680,6 +684,7 @@ void RosAriaNode::publish()
 	published_motors_state = true;
   }
 
+  
   // Publish sonar information, if enabled.
   if (publish_sonar || publish_sonar_pointcloud2)
   {
