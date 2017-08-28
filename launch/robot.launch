@@ -1,0 +1,21 @@
+<launch>
+
+<arg name="sim" default="true"/>
+<remap if="$(arg sim)" from="/rosaria/sim_S3Series_1_laserscan" to="/scan" />
+<remap unless="$(arg sim)" from="/rosaria/S3Series_1_laserscan" to="/scan" />
+<remap if="$(arg sim)" from="/rosaria/sim_S3Series_1_pointcloud" to="/pointcloud" />
+<remap unless="$(arg sim)" from="/rosaria/S3Series_1_pointcloud" to="/pointcloud" />
+<remap from="/rosaria/cmd_vel" to="/cmd_vel" />
+<node
+    name = "rosaria"
+    pkg	 = "rosaria" 
+    type = "RosAria"  
+    
+    output = "screen"
+  />
+
+
+
+</launch>
+
+
