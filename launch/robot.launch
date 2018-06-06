@@ -1,0 +1,10 @@
+<launch>
+
+<node
+    name = "rosaria"
+    pkg	 = "rosaria" 
+    type = "RosAria"
+    output = "screen"
+/>
+
+</launch>
